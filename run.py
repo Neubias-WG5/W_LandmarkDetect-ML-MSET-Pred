@@ -30,15 +30,16 @@ from cytomine import cytomine, models, CytomineJob
 from cytomine.models import *
 from cytomine.models import Annotation, Job, ImageInstanceCollection, AnnotationCollection, Property, AttachedFileCollection, AttachedFile
 import numpy as np
+from neubiaswg5 import CLASS_LNDDET
+from neubiaswg5.helpers import NeubiasJob, prepare_data, upload_data, upload_metrics, get_discipline
+from neubiaswg5.helpers.data_upload import imwrite
 """
 Given the classifier clf, this function will try to find the landmark on the
 image current
 """
 
 
-def searchpoint_cytomine(repository, current, clf, mx, my, cm, depths, window_size, feature_type, feature_parameters,
-						 image_type,
-						 npred):
+def searchpoint_cytomine(repository, current, clf, mx, my, cm, depths, window_size, feature_type, feature_parameters, image_type, npred):
 	simage = readimage(repository, current, image_type)
 	(height, width) = simage.shape
 
@@ -94,7 +95,7 @@ def searchpoint_cytomine(repository, current, clf, mx, my, cm, depths, window_si
 				maxy = np.concatenate((maxy, ysup))
 		pos = pos + step
 
-	return np.median(maxx), (height + 1) - np.median(maxy)
+	return np.median(maxx), np.median(maxy), height, width
 
 
 def str2bool(v):
@@ -104,32 +105,13 @@ def find_by_attribute(att_fil, attr, val):
 	return next(iter([i for i in att_fil if hasattr(i, attr) and getattr(i, attr) == val]), None)
 
 def main():
-	with CytomineJob.from_cli(sys.argv) as conn:
-		base_path = "{}".format(os.getenv("HOME"))
-		working_path = os.path.join(base_path, str(conn.job.id))
-		in_path = os.path.join(working_path, "in/")
-		out_path = os.path.join(working_path, "out/")
+	with NeubiasJob.from_cli(sys.argv) as conn:
+		problem_cls = get_discipline(conn, default=CLASS_LNDDET)
+		is_2d = True
+		conn.job.update(status=Job.RUNNING, progress=0, statusComment="Initialization of the prediction phase")
+		in_images, gt_images, in_path, gt_path, out_path, tmp_path = prepare_data(problem_cls, conn, is_2d=is_2d, **conn.flags)
+		list_imgs = [int(image.rstrip('.tif')) for image in os.listdir(in_path) if image.endswith('.tif')]
 
-		tr_working_path = os.path.join(base_path, str(conn.parameters.model_to_use))
-		tr_out_path = os.path.join(tr_working_path, "out/")
-
-		if not os.path.exists(working_path):
-			os.makedirs(working_path)
-			os.makedirs(in_path)
-
-		images = ImageInstanceCollection().fetch_with_filter("project", conn.parameters.cytomine_id_project)
-		list_imgs = []
-		if conn.parameters.images_to_predict == 'all':
-			for image in images:
-				list_imgs.append(int(image.id))
-				image.dump(os.path.join(in_path, '%d.jpg' % (image.id)))
-		else:
-			list_imgs = [int(id_img) for id_img in conn.parameters.images_to_predict.split(',')]
-			for image in images:
-				if image.id in list_imgs:
-					image.dump(os.path.join(in_path, '%d.jpg' % (image.id)))
-
-		annotation_collection = AnnotationCollection()
 		train_job = Job().fetch(conn.parameters.model_to_use)
 		properties = PropertyCollection(train_job).fetch()
 		str_terms = ""
@@ -139,7 +121,9 @@ def main():
 		term_list = [int(x) for x in str_terms.split(' ')]
 		attached_files = AttachedFileCollection(train_job).fetch()
 
-		for id_term in conn.monitor(term_list, start=10, end=90, period = 0.05, prefix="Finding landmarks for terms..."):
+		hash_pos = {}
+		hash_size = {}
+		for id_term in conn.monitor(term_list, start=10, end=70, period = 0.05, prefix="Finding landmarks for terms..."):
 			model_file = find_by_attribute(attached_files, "filename", "%d_model.joblib"%id_term)
 			model_filepath = os.path.join(in_path, "%d_model.joblib"%id_term)
 			model_file.download(model_filepath, override=True)
@@ -160,11 +144,30 @@ def main():
 				fparameters_file.download(fparametersl_filepath, override=True)
 				feature_parameters = joblib.load(fparametersl_filepath)
 			for id_img in list_imgs:
-				(x, y) = searchpoint_cytomine(in_path, id_img, model, mx, my, cm, 1. / (2. ** np.arange(parameters_hash['model_depth'])), parameters_hash['window_size'], parameters_hash['feature_type'], feature_parameters, 'jpg', parameters_hash['model_npred'])
-				circle = Point(x, y)
-				annotation_collection.append(Annotation(location=circle.wkt, id_image=id_img, id_terms=[id_term], id_project=conn.parameters.cytomine_id_project))
-
-		annotation_collection.save()
+				(x, y, height, width) = searchpoint_cytomine(in_path, id_img, model, mx, my, cm, 1. / (2. ** np.arange(parameters_hash['model_depth'])), parameters_hash['window_size'], parameters_hash['feature_type'], feature_parameters, 'tif', parameters_hash['model_npred'])
+				if (not id_img in hash_size):
+					hash_size[id_img] = (height, width)
+					hash_pos[id_img] = []
+				hash_pos[id_img].append(((id_term, x, y)))
+		conn.job.update(status=Job.RUNNING, progress=95, statusComment="Uploading the results...")
+		for id_img in list_imgs:
+			(h, w) = hash_size[id_img]
+			lbl_img = np.zeros((h, w), 'uint8')
+			for (id_term, x, y) in hash_pos[id_img]:
+				intx = int(x)
+				inty = int(y)
+				if lbl_img[inty, intx] > 0:
+					(ys, xs) = np.where(lbl_img==0)
+					dis = np.sqrt((ys-y)**2 + (xs-x)**2)
+					j = np.argmin(dis)
+					intx = int(xs[j])
+					inty = int(ys[j])
+				lbl_img[inty, intx] = id_term
+			imwrite(path=os.path.join(out_path, '%d.tif'%id_img), image=lbl_img.astype(np.uint8), is_2d=is_2d)
+		upload_data(problem_cls, conn, in_images, out_path, **conn.flags, is_2d=is_2d, monitor_params={"start": 70, "end": 90, "period": 0.1})
+		conn.job.update(progress=90, statusComment="Computing and uploading metrics (if necessary)...")
+		upload_metrics(problem_cls, conn, in_images, gt_path, out_path, tmp_path, **conn.flags)
+		conn.job.update(status=Job.TERMINATED, progress=100, statusComment="Finished.")
 
 if __name__ == "__main__":
 	main()

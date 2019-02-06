@@ -1,7 +1,7 @@
 {
     "name": "LandmarkDetect-ML-MSET-Pred-A",
     "container-image": {
-        "image": "cytomineuliege/s_landmarkdetect-ml-mset-pred",
+        "image": "neubiaswg5/w_landmarkdetect-ml-mset-pred",
         "type": "singularity"
     },
     "schema-version": "cytomine-0.1",
