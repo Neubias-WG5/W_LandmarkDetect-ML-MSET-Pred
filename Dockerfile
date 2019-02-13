@@ -9,7 +9,7 @@ RUN rm -r /Cytomine-python-client
 # --------------------------------------------------------------------------------------------
 # Install Neubias-W5-Utilities (annotation exporter, compute metrics, helpers,...)
 RUN git clone https://github.com/Neubias-WG5/neubiaswg5-utilities.git
-RUN cd /neubiaswg5-utilities/ && git checkout tags/v0.5.3a && pip install .
+RUN cd /neubiaswg5-utilities/ && git checkout tags/v0.5.3c && pip install .
 
 # Metric for PixCla is pure python so don't need java, nor binaries
 # RUN apt-get update && apt-get install openjdk-8-jdk -y && apt-get cleandock
