@@ -1,5 +1,5 @@
 {
-    "name": "LandmarkDetect-ML-MSET-Pred-A",
+    "name": "LandmarkDetect-ML-MSET-Pred-B",
     "container-image": {
         "image": "neubiaswg5/w_landmarkdetect-ml-mset-pred",
         "type": "singularity"

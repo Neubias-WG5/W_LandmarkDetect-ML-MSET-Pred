@@ -44,8 +44,8 @@ def searchpoint_cytomine(repository, current, clf, mx, my, cm, depths, window_si
 	(height, width) = simage.shape
 
 	P = np.random.multivariate_normal([mx, my], cm, npred)
-	x_v = np.round(P[:, 0] * width)
-	y_v = np.round(P[:, 1] * height)
+	x_v = np.round(P[:, 0] * width).astype('int')
+	y_v = np.round(P[:, 1] * height).astype('int')
 
 	height = height - 1
 	width = width - 1
@@ -74,9 +74,9 @@ def searchpoint_cytomine(repository, current, clf, mx, my, cm, depths, window_si
 			y_v[index] = height
 
 	while (pos < n):
-		xp = np.array(x_v[pos:min(n, pos + step)])
-		yp = np.array(y_v[pos:min(n, pos + step)])
-
+		xp = np.array(x_v[pos:min(n, pos + step)]).astype('int')
+		yp = np.array(y_v[pos:min(n, pos + step)]).astype('int')
+		print(xp, yp)
 		DATASET = build_dataset_image(simage, window_size, xp, yp, feature_type, feature_parameters, depths)
 		pred = clf.predict_proba(DATASET)
 		pred = pred[:, 1]
