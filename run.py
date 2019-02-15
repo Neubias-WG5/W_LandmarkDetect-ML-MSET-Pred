@@ -76,7 +76,6 @@ def searchpoint_cytomine(repository, current, clf, mx, my, cm, depths, window_si
 	while (pos < n):
 		xp = np.array(x_v[pos:min(n, pos + step)]).astype('int')
 		yp = np.array(y_v[pos:min(n, pos + step)]).astype('int')
-		print(xp, yp)
 		DATASET = build_dataset_image(simage, window_size, xp, yp, feature_type, feature_parameters, depths)
 		pred = clf.predict_proba(DATASET)
 		pred = pred[:, 1]
